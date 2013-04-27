@@ -94,7 +94,27 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
   KVStoreStatus::type RemoveFromList(const std::string& key, const std::string& value, const std::string& clientid) {
     // Your implementation goes here
-    printf("RemoveFromList\n");
+    cout << "RemoveFromList " << key << " " << value << endl;
+    string::size_type pos;
+    std::vector<string> *sub_list;
+    std::vector<string>::iterator iter;
+
+    pos = key.find("_sublist");
+    if (pos != key.npos) {
+	if (subscription_list.find(key) == subscription_list.end()) {
+	    return KVStoreStatus::EKEYNOTFOUND;
+	}
+
+	sub_list = &subscription_list[key];
+	iter = find(sub_list->begin(), sub_list->end(), value);
+	if (iter == sub_list->end()) {
+	    return KVStoreStatus::EKEYNOTFOUND;
+	} else {
+	    sub_list->erase(iter);
+	    return KVStoreStatus::OK;
+	}
+    }
+
     return KVStoreStatus::NOT_IMPLEMENTED;
   }
 

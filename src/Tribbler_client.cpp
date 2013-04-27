@@ -102,6 +102,8 @@ int main(int argc, char **argv) {
     }
 
     client.GetSubscriptions(sr_alice, "alice");
+    client.GetSubscriptions(sr_bob, "bob");
+    printSubscriptions(sr_alice, string("alice"));
     printSubscriptions(sr_bob, string("bob"));
 
     TribbleResponse tr_alice;
