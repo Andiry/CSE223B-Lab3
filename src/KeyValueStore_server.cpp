@@ -51,7 +51,19 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
   void GetList(GetListResponse& _return, const std::string& key) {
     // Your implementation goes here
-    printf("GetList\n");
+    cout << "GetList " << key << endl;
+    string::size_type pos;
+
+    pos = key.find("_sublist");
+    if (pos != key.npos) {
+	if (subscription_list.find(key) == subscription_list.end()) {
+	    _return.status = KVStoreStatus::EKEYNOTFOUND;
+	    return;
+	}
+	_return.values = subscription_list[key];
+	_return.status = KVStoreStatus::OK;
+	return;
+    }
     _return.status =  KVStoreStatus::NOT_IMPLEMENTED;
   }
 
@@ -68,7 +80,15 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
   KVStoreStatus::type AddToList(const std::string& key, const std::string& value, const std::string& clientid) {
     // Your implementation goes here
-    printf("AddToList\n");
+    cout << "AddToList " << key << " " << value << endl;
+    string::size_type pos;
+
+    pos = key.find("_sublist");
+    if (pos != key.npos) {
+	subscription_list[key].push_back(value);
+	return KVStoreStatus::OK;
+    }
+
     return KVStoreStatus::NOT_IMPLEMENTED;
   }
 
@@ -82,6 +102,7 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
     int _id;
     vector < pair<string, int> > _backendServerVector;
     std::map<string, string> user_list;
+    std::map<string, vector<string> > subscription_list;
 
 };
 
