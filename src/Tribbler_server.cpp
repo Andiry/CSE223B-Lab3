@@ -338,7 +338,7 @@ finish:
     // Making the RPC Call
     KVStoreStatus::type st;
     transport->open();
-    st = kv_client.AddToList(key, value);
+    st = kv_client.AddToList(key, value, "t_s");
     transport->close();
     return st;
   }
@@ -351,7 +351,7 @@ finish:
     KeyValueStoreClient client(protocol);
     KVStoreStatus::type st;
     transport->open();
-    st = client.RemoveFromList(key, value);
+    st = client.RemoveFromList(key, value, "t_s");
     transport->close();
     return st;
   }
@@ -377,7 +377,7 @@ finish:
     KeyValueStoreClient client(protocol);
     KVStoreStatus::type st;
     transport->open();
-    st = client.Put(key, value);
+    st = client.Put(key, value, "t_s");
     transport->close();
     return st;
   }
