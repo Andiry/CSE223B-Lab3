@@ -6,6 +6,7 @@
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
+#include <map>
 
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
@@ -37,8 +38,15 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
   void Get(GetResponse& _return, const std::string& key) {
     // Your implementation goes here
-    printf("Get\n");
-    _return.status =  KVStoreStatus::NOT_IMPLEMENTED;
+    cout << "Get " << key << endl;
+    if (user_list.find(key) == user_list.end()) {
+	_return.status = KVStoreStatus::EKEYNOTFOUND;
+	return;
+    }
+
+    _return.value = user_list[key];
+    _return.status =  KVStoreStatus::OK;
+    return;
   }
 
   void GetList(GetListResponse& _return, const std::string& key) {
@@ -49,8 +57,13 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
   KVStoreStatus::type Put(const std::string& key, const std::string& value, const std::string& clientid) {
     // Your implementation goes here
-    printf("Put\n");
-    return KVStoreStatus::NOT_IMPLEMENTED;
+    cout << "Put " << key << " " << value << endl;
+    if (user_list.find(key) != user_list.end()) {
+	return KVStoreStatus::EITEMEXISTS;
+    }
+
+    user_list[key] = value;
+    return  KVStoreStatus::OK;
   }
 
   KVStoreStatus::type AddToList(const std::string& key, const std::string& value, const std::string& clientid) {
@@ -68,6 +81,7 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
   private:
     int _id;
     vector < pair<string, int> > _backendServerVector;
+    std::map<string, string> user_list;
 
 };
 
