@@ -146,9 +146,9 @@ class TribblerHandler : virtual public TribblerIf {
     lt = time(NULL);
     tribble.userid = userid;
     tribble.contents = tribbleContents;
-    tribble.posted = static_cast<uint64_t>(lt);
+    tribble.posted.push_back(static_cast<uint64_t>(lt));
 
-    sprintf(t, "%llu", tribble.posted);
+    //sprintf(t, "%llu", tribble.posted);
     timestamp = t;
     tribble_string = "{{" + tribble.userid + "},{" + tribble.contents + "}}";
     cout << tribble_string << endl;
@@ -248,7 +248,7 @@ class TribblerHandler : virtual public TribblerIf {
 		for (j = tribbles.values.begin(); j != tribbles.values.end(); ++j) {
 		    if (!process_tribble(&tribble, *j, &id) && id == userid) {
 			t = (*i).c_str();
-			tribble.posted = atoi(t);
+			tribble.posted.push_back(atoi(t));
     	    		_return.tribbles.push_back(tribble);
 			size++;
 			if (size == 100)
