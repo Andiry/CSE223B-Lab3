@@ -32,6 +32,7 @@ class TribblerHandler : virtual public TribblerIf {
     cout << "Server: " << storageServer << " Port: " << storageServerPort << endl;
     _storageServer = storageServer;
     _storageServerPort = storageServerPort;
+    _index = 0;
   }
 
   TribbleStatus::type CreateUser(const std::string& userid) {
@@ -40,13 +41,14 @@ class TribblerHandler : virtual public TribblerIf {
     KVStoreStatus::type bs_create;
     TribbleStatus::type s_create;
     GetResponse bs_as;
+    string check_user = userid + "_user";
 
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status == KVStoreStatus::OK && bs_as.value == "Created") {
 	cout << "User " << userid << " aleardy exist" << endl;
 	return TribbleStatus::OK;
     }
-    bs_create = Put(userid, "Created");
+    bs_create = Put(check_user, "Created", "t_s");
     cout << "CreateUser result " << bs_create << endl;
     if (bs_create != KVStoreStatus::OK) {
     	cout << "Failed to create user: Error code " << bs_create << endl;
@@ -63,21 +65,23 @@ class TribblerHandler : virtual public TribblerIf {
     GetListResponse bs_as_res;
     KVStoreStatus::type bs_atl;
     string user_subscribe = userid;
+    string check_user = userid + "_user";
+    string check_user_sub = subscribeto + "_user";
 
     printf("AddSubscription %s, %s\n", userid.c_str(), subscribeto.c_str());
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << userid << " does not exist!" << endl;
 	return TribbleStatus::INVALID_USER;
     }
-    bs_as = Get(subscribeto);
+    bs_as = Get(check_user_sub);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << subscribeto << " does not exist!" << endl;
 	return TribbleStatus::INVALID_SUBSCRIBETO;
     }
 
     user_subscribe += "_sublist";
-    bs_atl = AddToList(user_subscribe, subscribeto);
+    bs_atl = AddToList(user_subscribe, subscribeto, "t_s");
     if (bs_atl != KVStoreStatus::OK && bs_atl != KVStoreStatus::EITEMEXISTS) {
 	cout << "Subscribe to user " << subscribeto << " failed!" << endl;
 	return TribbleStatus::INVALID_SUBSCRIBETO;
@@ -99,21 +103,23 @@ class TribblerHandler : virtual public TribblerIf {
     GetResponse bs_as;
     KVStoreStatus::type bs_atl;
     string user_subscribe = userid;
+    string check_user = userid + "_user";
+    string check_user_sub = subscribeto + "_user";
 
     printf("RemoveSubscription %s, %s\n", userid.c_str(), subscribeto.c_str());
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << userid << " does not exist!" << endl;
 	return TribbleStatus::INVALID_USER;
     }
-    bs_as = Get(subscribeto);
+    bs_as = Get(check_user_sub);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << subscribeto << " does not exist!" << endl;
 	return TribbleStatus::INVALID_SUBSCRIBETO;
     }
 
     user_subscribe += "_sublist";
-    bs_atl = RemoveFromList(user_subscribe, subscribeto);
+    bs_atl = RemoveFromList(user_subscribe, subscribeto, "t_s");
     if (bs_atl == KVStoreStatus::OK) {
 	return TribbleStatus::OK;
     } else if (bs_atl == KVStoreStatus::EITEMNOTFOUND) {
@@ -135,9 +141,10 @@ class TribblerHandler : virtual public TribblerIf {
     string tribble_string;
     string timestamp;
     char t[256];
+    string check_user = userid + "_user";
 
     printf("PostTribble %s, %s\n", userid.c_str(), tribbleContents.c_str());
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << userid << " does not exist!" << endl;
 	return TribbleStatus::INVALID_USER;
@@ -148,21 +155,21 @@ class TribblerHandler : virtual public TribblerIf {
     tribble.contents = tribbleContents;
     tribble.posted.push_back(static_cast<uint64_t>(lt));
 
-    //sprintf(t, "%llu", tribble.posted);
+    sprintf(t, "%d", _index++);
     timestamp = t;
     tribble_string = "{{" + tribble.userid + "},{" + tribble.contents + "}}";
     cout << tribble_string << endl;
     user_tribble += "_tribbles";
 
-    // Add tribble content to the list indexed by timestamp
+    // Post tribble to the backend server
+#if 0
     bs_atl = AddToList(timestamp, tribble_string);
     if (bs_atl != KVStoreStatus::OK) {
 	cout << "1 " << bs_atl << endl;
 	return TribbleStatus::INVALID_USER;
     }
-
-    // Add timestamp to the user's tribble list
-    bs_atl = AddToList(user_tribble, timestamp);
+#endif
+    bs_atl = AddToList("ts", tribble_string, timestamp);
     if (bs_atl == KVStoreStatus::OK || bs_atl == KVStoreStatus::EITEMEXISTS) {
 	return TribbleStatus::OK;
     }
@@ -173,7 +180,7 @@ class TribblerHandler : virtual public TribblerIf {
 
   int process_tribble(struct Tribble* tribble, string tribble_string, string *id) {
     int userid_start = 2;
-    int userid_end;
+    unsigned int userid_end;
     int tribble_start, tribble_end;
     int length;
     string strset = "}";
@@ -203,7 +210,7 @@ class TribblerHandler : virtual public TribblerIf {
   {
   	inline bool operator() (const string& s1, const string& s2)
 	{
-    		return s1 > s2;
+    		return atoi(s1.c_str()) > atoi(s2.c_str());
   	}
   };  
 
@@ -215,18 +222,37 @@ class TribblerHandler : virtual public TribblerIf {
   	}
   };  
 
+  void GetTribblesByTimeList(TribbleResponse& _return, const std::vector<string>& timelist) {
+    GetResponse ret;
+    vector<string>::const_iterator iter;
+    string tribble_content;
+    struct Tribble tribble;
+    string id;
+
+    for (iter = timelist.begin(); iter != timelist.end(); ++iter) {
+	ret = Get(*iter);
+	if (ret.status == KVStoreStatus::OK) {
+	    tribble_content = ret.value;
+	    if (!process_tribble(&tribble, tribble_content, &id)) {
+		tribble.posted.push_back(atoi((*iter).c_str()));
+    	    	_return.tribbles.push_back(tribble);
+	    }
+	}
+    }
+  }
+
+    // Your implementation goes here
   void GetTribbles(TribbleResponse& _return, const std::string& userid) {
     // Your implementation goes here
     GetResponse bs_as;
     string user_tribble = userid;
     GetListResponse bs_gt_res, tribbles;
     struct Tribble tribble;
-    unsigned int size = 0;
     string id;
-    const char *t;
+    string check_user = userid + "_user";
 
     printf("GetTribbles\n");
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << userid << " does not exist!" << endl;
     	_return.status = TribbleStatus::INVALID_USER;
@@ -237,30 +263,8 @@ class TribblerHandler : virtual public TribblerIf {
     bs_gt_res = GetList(user_tribble);
     if (bs_gt_res.status == KVStoreStatus::OK && !bs_gt_res.values.empty()) {
 	cout << userid << " Tribbles: ";
-        sort(bs_gt_res.values.begin(), bs_gt_res.values.end(), decrease());
-
-	vector<string>::iterator i = bs_gt_res.values.begin();
-	for (i = bs_gt_res.values.begin(); i != bs_gt_res.values.end(); ++i) {
-	    tribbles = GetList(*i);
-
-	    if (tribbles.status == KVStoreStatus::OK && !tribbles.values.empty()) {
-		vector<string>::iterator j = tribbles.values.begin();
-		for (j = tribbles.values.begin(); j != tribbles.values.end(); ++j) {
-		    if (!process_tribble(&tribble, *j, &id) && id == userid) {
-			t = (*i).c_str();
-			tribble.posted.push_back(atoi(t));
-    	    		_return.tribbles.push_back(tribble);
-			size++;
-			if (size == 100)
-			    goto finish;
-		    }
-		}
-	    }
-	}
+	GetTribblesByTimeList(_return, bs_gt_res.values);
     }
-
-finish:
-    sort(_return.tribbles.begin(), _return.tribbles.end(), decrease1());
     _return.status = TribbleStatus::OK;
   }
 
@@ -273,9 +277,12 @@ finish:
     TribbleResponse tribbles;
     struct Tribble tribble;
     unsigned int size;
+    string check_user = userid + "_user";
+    string sub_user;
+    vector<string> timelist;
 
     printf("GetTribblesBySubscription\n");
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << userid << " does not exist!" << endl;
     	_return.status = TribbleStatus::INVALID_USER;
@@ -291,17 +298,23 @@ finish:
 
     size = user_sublist.subscriptions.size();
     for (unsigned int i = 0; i < size; ++i) {
-	GetTribbles(tribbles, user_sublist.subscriptions[i]);
+	sub_user = user_sublist.subscriptions[i];
+	sub_user += "_tribbles";
+        bs_gt_res = GetList(sub_user);
+	if (bs_gt_res.status == KVStoreStatus::OK && !bs_gt_res.values.empty()) {
+	    timelist.insert(timelist.end(), bs_gt_res.values.begin(),
+				bs_gt_res.values.end());
+	}
     }
 
-    sort(tribbles.tribbles.begin(), tribbles.tribbles.end(), decrease1());
-    size = tribbles.tribbles.size();
+    sort(timelist.begin(), timelist.end(), decrease());
+    size = timelist.size();
 
     if (size > 100) {
-        tribbles.tribbles.resize(100);
+        timelist.resize(100);
     }
 
-    _return.tribbles = tribbles.tribbles;
+    GetTribblesByTimeList(_return, timelist);
     _return.status = TribbleStatus::OK;
   }
 
@@ -311,9 +324,10 @@ finish:
     GetResponse bs_as;
     string user_subscribe = userid;
     GetListResponse bs_as_res;
+    string check_user = userid + "_user";
 
     _return.status = TribbleStatus::NOT_IMPLEMENTED;
-    bs_as = Get(userid);
+    bs_as = Get(check_user);
     if (bs_as.status != KVStoreStatus::OK || bs_as.value != "Created") {
 	cout << "User " << userid << " does not exist!" << endl;
 	return;
@@ -330,7 +344,7 @@ finish:
   }
 
   // Functions from interacting with the storage RPC server
-  KVStoreStatus::type AddToList(std::string key, std::string value) {
+  KVStoreStatus::type AddToList(std::string key, std::string value, std::string clientid) {
     boost::shared_ptr<TSocket> socket(new TSocket(_storageServer, _storageServerPort));
     boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
     boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
@@ -338,12 +352,12 @@ finish:
     // Making the RPC Call
     KVStoreStatus::type st;
     transport->open();
-    st = kv_client.AddToList(key, value, "t_s");
+    st = kv_client.AddToList(key, value, clientid);
     transport->close();
     return st;
   }
 
-  KVStoreStatus::type RemoveFromList(std::string key, std::string value) {
+  KVStoreStatus::type RemoveFromList(std::string key, std::string value, std::string clientid) {
     // Making the RPC Call to the Storage server
     boost::shared_ptr<TSocket> socket(new TSocket(_storageServer, _storageServerPort));
     boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
@@ -351,7 +365,7 @@ finish:
     KeyValueStoreClient client(protocol);
     KVStoreStatus::type st;
     transport->open();
-    st = client.RemoveFromList(key, value, "t_s");
+    st = client.RemoveFromList(key, value, clientid);
     transport->close();
     return st;
   }
@@ -369,7 +383,7 @@ finish:
     return response;
   }
 
-  KVStoreStatus::type Put(std::string key, std::string value) {
+  KVStoreStatus::type Put(std::string key, std::string value, std::string clientid) {
     // Making the RPC Call to the Storage server
     boost::shared_ptr<TSocket> socket(new TSocket(_storageServer, _storageServerPort));
     boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
@@ -377,7 +391,7 @@ finish:
     KeyValueStoreClient client(protocol);
     KVStoreStatus::type st;
     transport->open();
-    st = client.Put(key, value, "t_s");
+    st = client.Put(key, value, clientid);
     transport->close();
     return st;
   }
@@ -398,6 +412,7 @@ finish:
  private:
   std::string _storageServer;
   int _storageServerPort;
+  int _index;
 };
 
 int main(int argc, char **argv) {

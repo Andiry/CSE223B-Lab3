@@ -34,25 +34,50 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
       _backendServerVector.push_back(make_pair(peer_ip, peer_port));
       cout << "Backend server at: " << peer_ip << " on port: " << peer_port << endl;
     }
+
+    _cur_index = 0;
   }
 
   void Get(GetResponse& _return, const std::string& key) {
     // Your implementation goes here
+    string::size_type pos;
     cout << "Get " << key << endl;
-    if (user_list.find(key) == user_list.end()) {
+
+    pos = key.find("_user");
+    if (pos != key.npos) {
+	if (user_list.find(key) == user_list.end()) {
+	    _return.status = KVStoreStatus::EKEYNOTFOUND;
+	    return;
+	}
+
+	_return.value = user_list[key];
+	_return.status =  KVStoreStatus::OK;
+	return;
+    }
+
+    if (time_tribble_list.find(key) == time_tribble_list.end()) {
 	_return.status = KVStoreStatus::EKEYNOTFOUND;
 	return;
     }
 
-    _return.value = user_list[key];
+    _return.value = time_tribble_list[key];
     _return.status =  KVStoreStatus::OK;
     return;
   }
+
+  struct decrease
+  {
+	inline bool operator() (const string& i1, const string& i2)
+	{
+		return atoi(i1.c_str()) > atoi(i2.c_str());
+	}
+  };
 
   void GetList(GetListResponse& _return, const std::string& key) {
     // Your implementation goes here
     cout << "GetList " << key << endl;
     string::size_type pos;
+    std::vector<string> timelist;
 
     pos = key.find("_sublist");
     if (pos != key.npos) {
@@ -64,24 +89,77 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 	_return.status = KVStoreStatus::OK;
 	return;
     }
-    _return.status =  KVStoreStatus::NOT_IMPLEMENTED;
+
+    pos = key.find("_tribbles");
+    if (pos != key.npos) {
+	if (user_time_list.find(key) == user_time_list.end()) {
+	    _return.status = KVStoreStatus::EKEYNOTFOUND;
+	    return;
+	}
+
+	timelist = user_time_list[key];
+	sort(timelist.begin(), timelist.end(), decrease());
+	if (timelist.size() > 100)
+	    timelist.resize(100);
+
+	_return.values = timelist;
+	_return.status = KVStoreStatus::OK;
+	return;
+    }
+
+    _return.status =  KVStoreStatus::INTERNAL_FAILURE;
   }
 
   KVStoreStatus::type Put(const std::string& key, const std::string& value, const std::string& clientid) {
+    string::size_type pos;
     // Your implementation goes here
+
     cout << "Put " << key << " " << value << endl;
-    if (user_list.find(key) != user_list.end()) {
+    pos = key.find("_user");
+    if (pos != key.npos) {
+	if (user_list.find(key) != user_list.end()) {
+	    return KVStoreStatus::EITEMEXISTS;
+	}
+
+	user_list[key] = value;
+	return  KVStoreStatus::OK;
+    }
+
+    if (time_tribble_list.find(key) != time_tribble_list.end()) {
 	return KVStoreStatus::EITEMEXISTS;
     }
 
-    user_list[key] = value;
+    time_tribble_list[key] = value;
     return  KVStoreStatus::OK;
+
+  }
+
+  int get_userid_from_tribble(const std::string& tribble_string,
+				string& id)
+  {
+    int userid_start = 2;
+    unsigned int userid_end;
+    string strset = "}";
+
+    userid_end = tribble_string.find_first_of(strset);
+    if (userid_end == string::npos) {
+	cout << "Not find }" << endl;
+        return -1;
+    }
+    
+    id = tribble_string.substr(userid_start, userid_end - userid_start);
+    return 0;
+
   }
 
   KVStoreStatus::type AddToList(const std::string& key, const std::string& value, const std::string& clientid) {
     // Your implementation goes here
     cout << "AddToList " << key << " " << value << endl;
     string::size_type pos;
+    string index_str;
+    string user_id;
+    char t[256];
+    int ret;
 
     pos = key.find("_sublist");
     if (pos != key.npos) {
@@ -89,7 +167,28 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 	return KVStoreStatus::OK;
     }
 
-    return KVStoreStatus::NOT_IMPLEMENTED;
+    if (key == "ts") {
+	ret = get_userid_from_tribble(value, user_id);
+	if (ret)
+	    return KVStoreStatus::INTERNAL_FAILURE;
+
+	sprintf(t, "%d", _cur_index);
+	_cur_index++;
+	index_str = t;
+
+	if (time_tribble_list.find(index_str)
+		!= time_tribble_list.end()) {
+	    return KVStoreStatus::EITEMEXISTS;
+	}
+	index_str = t;
+	time_tribble_list[index_str] = value;
+	user_id += "_tribbles";
+	user_time_list[user_id].push_back(index_str);
+
+	return KVStoreStatus::OK;
+    }
+
+    return KVStoreStatus::INTERNAL_FAILURE;
   }
 
   KVStoreStatus::type RemoveFromList(const std::string& key, const std::string& value, const std::string& clientid) {
@@ -123,6 +222,9 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
     vector < pair<string, int> > _backendServerVector;
     std::map<string, string> user_list;
     std::map<string, vector<string> > subscription_list;
+    std::map<string, vector<string> > user_time_list;
+    std::map<string, string> time_tribble_list;
+    int _cur_index;
 
 };
 
