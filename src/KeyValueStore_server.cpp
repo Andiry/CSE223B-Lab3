@@ -2,6 +2,7 @@
 // You should copy it to another filename to avoid overwriting it.
 
 #include "KeyValueStore.h"
+#include <transport/TSocket.h>
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/transport/TServerSocket.h>
@@ -17,6 +18,13 @@ using boost::shared_ptr;
 using namespace std;
 
 using namespace  ::KeyValueStore;
+
+enum op_type
+{
+    type_add = 0,
+    type_remove,
+    type_put
+};
 
 class KeyValueStoreHandler : virtual public KeyValueStoreIf {
  public:
@@ -122,7 +130,7 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 	}
 
 	user_list[key] = value;
-	return  KVStoreStatus::OK;
+	goto finish;
     }
 
     if (time_tribble_list.find(key) != time_tribble_list.end()) {
@@ -130,6 +138,11 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
     }
 
     time_tribble_list[key] = value;
+
+finish:
+    if (clientid == "t_s")
+	PropagateToOtherServers(type_put, key, value, clientid); 
+    cout << "Put finished " << key << " " << value << endl;
     return  KVStoreStatus::OK;
 
   }
@@ -217,7 +230,49 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
     return KVStoreStatus::NOT_IMPLEMENTED;
   }
 
-  private:
+  KVStoreStatus::type PropagateToOtherServers(enum op_type type, std::string key, std::string value, std::string clientid) {
+    // Making the RPC Call to the Storage server
+    std::vector<pair<string, int> >::iterator iter;
+    std::string storageServer;
+    int storageServerPort;
+    KVStoreStatus::type st;
+
+    for (iter = _backendServerVector.begin(); iter != _backendServerVector.end(); ++iter) {
+	storageServer = iter->first;
+	storageServerPort = iter->second;
+	cout << "Propagate to server " << storageServer << " " << storageServerPort << endl;
+	boost::shared_ptr<TSocket> socket(new TSocket(storageServer, storageServerPort));
+	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+	KeyValueStoreClient client(protocol);
+	socket->setConnTimeout(100);
+	socket->setRecvTimeout(100);
+	socket->setSendTimeout(100);
+	try {
+	    transport->open();
+	    switch (type) {
+	    case type_add:
+		st = client.AddToList(key, value, clientid);
+		break;
+	    case type_remove:
+		st = client.RemoveFromList(key, value, clientid);
+		break;
+	    case type_put:
+		st = client.Put(key, value, "b_s");
+		break;
+	    default:
+		st = KVStoreStatus::INTERNAL_FAILURE;
+		break;
+	    }
+	    transport->close();
+	} catch (TException &tx) {
+	    cout << "ERROR: %s" << tx.what() << endl;
+	    continue;
+	}
+    }
+    return st;
+  }
+
     int _id;
     vector < pair<string, int> > _backendServerVector;
     std::map<string, string> user_list;
