@@ -53,12 +53,12 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
     pos = key.find("_user");
     if (pos != key.npos) {
-	if (user_list.find(key) == user_list.end()) {
+	if (std::find(user_list.begin(), user_list.end(), key) != user_list.end()) {
 	    _return.status = KVStoreStatus::EKEYNOTFOUND;
 	    return;
 	}
 
-	_return.value = user_list[key];
+	_return.value = "Created";
 	_return.status =  KVStoreStatus::OK;
 	return;
     }
@@ -125,11 +125,11 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
     cout << "Put " << key << " " << value << endl;
     pos = key.find("_user");
     if (pos != key.npos) {
-	if (user_list.find(key) != user_list.end()) {
+	if (std::find(user_list.begin(), user_list.end(), key) != user_list.end()) {
 	    return KVStoreStatus::EITEMEXISTS;
 	}
 
-	user_list[key] = value;
+	user_list.push_back(key);
 	goto finish;
     }
 
@@ -275,7 +275,7 @@ finish:
 
     int _id;
     vector < pair<string, int> > _backendServerVector;
-    std::map<string, string> user_list;
+    vector<string> user_list;
     std::map<string, vector<string> > subscription_list;
     std::map<string, vector<string> > user_time_list;
     std::map<string, string> time_tribble_list;
