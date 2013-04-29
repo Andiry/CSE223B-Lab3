@@ -137,11 +137,10 @@ class TribblerHandler : virtual public TribblerIf {
     KVStoreStatus::type bs_atl;
     struct Tribble tribble;
     string user_tribble = userid;
-    time_t lt;
     string tribble_string;
     string timestamp;
-    char t[256];
     string check_user = userid + "_user";
+    time_t lt;
 
     printf("PostTribble %s, %s\n", userid.c_str(), tribbleContents.c_str());
     bs_as = Get(check_user);
@@ -155,21 +154,12 @@ class TribblerHandler : virtual public TribblerIf {
     tribble.contents = tribbleContents;
     tribble.posted.push_back(static_cast<uint64_t>(lt));
 
-    sprintf(t, "%d", _index++);
-    timestamp = t;
     tribble_string = "{{" + tribble.userid + "},{" + tribble.contents + "}}";
     cout << tribble_string << endl;
     user_tribble += "_tribbles";
 
     // Post tribble to the backend server
-#if 0
-    bs_atl = AddToList(timestamp, tribble_string);
-    if (bs_atl != KVStoreStatus::OK) {
-	cout << "1 " << bs_atl << endl;
-	return TribbleStatus::INVALID_USER;
-    }
-#endif
-    bs_atl = AddToList("ts", tribble_string, timestamp);
+    bs_atl = AddToList(check_user, tribble_string, "t_s");
     if (bs_atl == KVStoreStatus::OK || bs_atl == KVStoreStatus::EITEMEXISTS) {
 	return TribbleStatus::OK;
     }

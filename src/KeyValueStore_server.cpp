@@ -165,6 +165,7 @@ finish:
 
   }
 
+#if 0
   int get_userid_from_tribble(const std::string& tribble_string,
 				string& id)
   {
@@ -182,6 +183,7 @@ finish:
     return 0;
 
   }
+#endif
 
   KVStoreStatus::type AddToList(const std::string& key, const std::string& value, const std::string& clientid) {
     // Your implementation goes here
@@ -190,36 +192,38 @@ finish:
     string index_str;
     string user_id;
     char t[256];
-    int ret;
 
     pos = key.find("_sublist");
     if (pos != key.npos) {
 	subscription_list[key].push_back(value);
-	return KVStoreStatus::OK;
+	goto finish;
     }
 
-    if (key == "ts") {
-	ret = get_userid_from_tribble(value, user_id);
-	if (ret)
-	    return KVStoreStatus::INTERNAL_FAILURE;
+    pos = key.find("_user");
+    if (pos != key.npos) {
+	user_id = key;
+	user_id.replace(user_id.end() - 5, user_id.end(), "_tribbles");
 
 	sprintf(t, "%d", _cur_index);
 	_cur_index++;
 	index_str = t;
 
-	if (time_tribble_list.find(index_str)
-		!= time_tribble_list.end()) {
+	if (time_tribble_list.find(index_str) != time_tribble_list.end()) {
 	    return KVStoreStatus::EITEMEXISTS;
 	}
 	index_str = t;
 	time_tribble_list[index_str] = value;
-	user_id += "_tribbles";
 	user_time_list[user_id].push_back(index_str);
 
-	return KVStoreStatus::OK;
+	goto finish;
     }
 
     return KVStoreStatus::INTERNAL_FAILURE;
+
+finish:
+    if (clientid == "t_s")
+	PropagateToOtherServers(type_add, key, value, clientid); 
+    return KVStoreStatus::OK;
   }
 
   KVStoreStatus::type RemoveFromList(const std::string& key, const std::string& value, const std::string& clientid) {
@@ -241,11 +245,16 @@ finish:
 	    return KVStoreStatus::EKEYNOTFOUND;
 	} else {
 	    sub_list->erase(iter);
-	    return KVStoreStatus::OK;
+	    goto finish;
 	}
     }
 
     return KVStoreStatus::NOT_IMPLEMENTED;
+
+finish:
+    if (clientid == "t_s")
+	PropagateToOtherServers(type_remove, key, value, clientid); 
+    return KVStoreStatus::OK;
   }
 
   KVStoreStatus::type PropagateToOtherServers(enum op_type type, std::string key, std::string value, std::string clientid) {
@@ -270,10 +279,10 @@ finish:
 	    transport->open();
 	    switch (type) {
 	    case type_add:
-		st = client.AddToList(key, value, clientid);
+		st = client.AddToList(key, value, "b_s");
 		break;
 	    case type_remove:
-		st = client.RemoveFromList(key, value, clientid);
+		st = client.RemoveFromList(key, value, "b_s");
 		break;
 	    case type_put:
 		st = client.Put(key, value, "b_s");
