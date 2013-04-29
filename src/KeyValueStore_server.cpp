@@ -44,21 +44,32 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
     }
 
     _cur_index = 0;
+    RetrieveDataFromOtherServers();
   }
 
   void Get(GetResponse& _return, const std::string& key) {
     // Your implementation goes here
     string::size_type pos;
     cout << "Get " << key << endl;
+    char t[256];
+    string index_str;
 
     pos = key.find("_user");
     if (pos != key.npos) {
 	if (std::find(user_list.begin(), user_list.end(), key) != user_list.end()) {
-	    _return.status = KVStoreStatus::EKEYNOTFOUND;
+	    _return.value = "Created";
+	    _return.status =  KVStoreStatus::OK;
 	    return;
 	}
 
-	_return.value = "Created";
+	_return.status = KVStoreStatus::EKEYNOTFOUND;
+	return;
+    }
+
+    if (key == "time_index") {
+	sprintf(t, "%d", _cur_index);
+	index_str = t;
+	_return.value = index_str;
 	_return.status =  KVStoreStatus::OK;
 	return;
     }
@@ -111,6 +122,13 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 	    timelist.resize(100);
 
 	_return.values = timelist;
+	_return.status = KVStoreStatus::OK;
+	return;
+    }
+
+    if (key == "GetNameList") {
+		cout << user_list.size() << endl;
+	_return.values = user_list;
 	_return.status = KVStoreStatus::OK;
 	return;
     }
@@ -271,6 +289,74 @@ finish:
 	}
     }
     return st;
+  }
+
+  KVStoreStatus::type RetrieveDataFromOtherServers() {
+    // Making the RPC Call to the Storage server
+    std::vector<pair<string, int> >::iterator iter;
+    std::vector<string>::iterator user_iter;
+    std::string storageServer;
+    int storageServerPort;
+    GetListResponse _return;
+    GetResponse _return1;
+    string sublist;
+    bool retry = false;
+
+    for (iter = _backendServerVector.begin(); iter != _backendServerVector.end(); ++iter) {
+	storageServer = iter->first;
+	storageServerPort = iter->second;
+	cout << "Retrieve data from server " << storageServer << " " << storageServerPort << endl;
+	boost::shared_ptr<TSocket> socket(new TSocket(storageServer, storageServerPort));
+	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+	KeyValueStoreClient client(protocol);
+	socket->setConnTimeout(100);
+	socket->setRecvTimeout(100);
+	socket->setSendTimeout(100);
+	try {
+	    transport->open();
+	    client.GetList(_return, "GetNameList");
+	    if (_return.status == KVStoreStatus::OK) {
+		cout << "Get user list succeed" << endl;
+		user_list = _return.values;
+	    } else {
+		cout << "ERROR: Failed to retrieve user list from " << storageServer \
+		     << " " << storageServerPort << endl;
+		retry = true;
+	    }
+
+	    for (user_iter = user_list.begin(); user_iter != user_list.end(); ++user_iter) {
+		sublist = *user_iter;
+		sublist.replace(sublist.end() - 5, sublist.end(), "_sublist");
+		client.GetList(_return, sublist);
+		if (_return.status == KVStoreStatus::OK) {
+		    subscription_list[sublist] = _return.values;
+		} else {
+		    cout << "ERROR: Failed to retrieve subscription list from " << storageServer \
+		         << " " << storageServerPort << endl;
+		    retry = true;
+		}
+	    }
+
+	    client.Get(_return1, "time_index");
+	    if (_return1.status == KVStoreStatus::OK) {
+		_cur_index = atoi(_return1.value.c_str());
+		cout << "Get time index succeed " << _cur_index << endl;
+	    } else {
+		cout << "ERROR: Failed to retrieve time index from " << storageServer \
+		     << " " << storageServerPort << endl;
+		retry = true;
+	    }
+
+	    transport->close();
+	    if (!retry)
+		break;
+	} catch (TException &tx) {
+	    cout << "ERROR: %s" << tx.what() << endl;
+	    continue;
+	}
+    }
+    return KVStoreStatus::OK;
   }
 
     int _id;

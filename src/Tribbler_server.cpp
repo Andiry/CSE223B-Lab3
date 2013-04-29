@@ -45,7 +45,7 @@ class TribblerHandler : virtual public TribblerIf {
 
     bs_as = Get(check_user);
     if (bs_as.status == KVStoreStatus::OK && bs_as.value == "Created") {
-	cout << "User " << userid << " aleardy exist" << endl;
+	cout << "User " << userid << " already exist" << endl;
 	return TribbleStatus::OK;
     }
     bs_create = Put(check_user, "Created", "t_s");
