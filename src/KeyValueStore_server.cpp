@@ -138,6 +138,7 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 
   KVStoreStatus::type Put(const std::string& key, const std::string& value, const std::string& clientid) {
     string::size_type pos;
+    int index;
     // Your implementation goes here
 
     cout << "Put " << key << " " << value << endl;
@@ -150,6 +151,23 @@ class KeyValueStoreHandler : virtual public KeyValueStoreIf {
 	user_list.push_back(key);
 	goto finish;
     }
+
+    if (key == "_grab_lock" && clientid == "b_s") {
+	index = atoi(value.c_str());
+	if (time_lock_list.find(index) == time_lock_list.end()) {
+	    time_lock_list[index] = "locked";
+	    return KVStoreStatus::OK;
+	} else {
+	    return KVStoreStatus::EPUTFAILED;
+	}
+    }
+ 
+    if (key == "_release_lock" && clientid == "b_s") {
+	index = atoi(value.c_str());
+	time_lock_list.erase(index);
+	return KVStoreStatus::OK;
+    }
+
 
     if (time_tribble_list.find(key) != time_tribble_list.end()) {
 	return KVStoreStatus::EITEMEXISTS;
@@ -165,36 +183,21 @@ finish:
 
   }
 
-#if 0
-  int get_userid_from_tribble(const std::string& tribble_string,
-				string& id)
-  {
-    int userid_start = 2;
-    unsigned int userid_end;
-    string strset = "}";
-
-    userid_end = tribble_string.find_first_of(strset);
-    if (userid_end == string::npos) {
-	cout << "Not find }" << endl;
-        return -1;
-    }
-    
-    id = tribble_string.substr(userid_start, userid_end - userid_start);
-    return 0;
-
-  }
-#endif
-
   KVStoreStatus::type AddToList(const std::string& key, const std::string& value, const std::string& clientid) {
     // Your implementation goes here
+    KVStoreStatus::type status;
     cout << "AddToList " << key << " " << value << endl;
     string::size_type pos;
     string index_str;
     string user_id;
     char t[256];
+    int index;
 
     pos = key.find("_sublist");
     if (pos != key.npos) {
+	if (std::find(subscription_list[key].begin(), subscription_list[key].end(), value) != subscription_list[key].end())
+	    return KVStoreStatus::EITEMEXISTS;
+
 	subscription_list[key].push_back(value);
 	goto finish;
     }
@@ -204,18 +207,40 @@ finish:
 	user_id = key;
 	user_id.replace(user_id.end() - 5, user_id.end(), "_tribbles");
 
-	sprintf(t, "%d", _cur_index);
-	_cur_index++;
-	index_str = t;
+	if (clientid == "t_s") {
+	    // Find a unlocked time slot
+	    index = _cur_index + 1;
+	    sprintf(t, "%d", index);
+	    index_str = t;
 
-	if (time_tribble_list.find(index_str) != time_tribble_list.end()) {
-	    return KVStoreStatus::EITEMEXISTS;
+	    while (time_lock_list.find(index) != time_lock_list.end()
+	    		|| time_tribble_list.find(index_str) != time_tribble_list.end()) {
+		index++;
+		sprintf(t, "%d", index);
+		index_str = t;
+	    }
+
+	    time_lock_list[index] = "locked";
+	    status = RequestLockFromOtherServers(index);
+	    if (status != KVStoreStatus::OK) {
+		time_lock_list.erase(index);
+		return KVStoreStatus::EPUTFAILED;
+	    }
+
+	    time_tribble_list[index_str] = value;
+	    user_time_list[user_id].push_back(index_str);
+	    PropagateToOtherServers(type_add, key, value, index_str); 
+
+	    ReleaseLockToOtherServers(index);
+	    time_lock_list.erase(index);
+	    _cur_index = index;
+	    return KVStoreStatus::OK;
+	} else {
+	    time_tribble_list[clientid] = value;
+	    user_time_list[user_id].push_back(clientid);
+	    index = atoi(clientid.c_str());
+	    _cur_index = index;
 	}
-	index_str = t;
-	time_tribble_list[index_str] = value;
-	user_time_list[user_id].push_back(index_str);
-
-	goto finish;
     }
 
     return KVStoreStatus::INTERNAL_FAILURE;
@@ -279,7 +304,10 @@ finish:
 	    transport->open();
 	    switch (type) {
 	    case type_add:
-		st = client.AddToList(key, value, "b_s");
+		if (clientid == "t_s")
+		    st = client.AddToList(key, value, "b_s");
+		else
+		    st = client.AddToList(key, value, clientid);
 		break;
 	    case type_remove:
 		st = client.RemoveFromList(key, value, "b_s");
@@ -368,12 +396,93 @@ finish:
     return KVStoreStatus::OK;
   }
 
+  KVStoreStatus::type ReleaseLockToOtherServers(int index) {
+    // Making the RPC Call to the Storage server
+    std::vector<pair<string, int> >::iterator iter;
+    std::string storageServer;
+    int storageServerPort;
+    char t[256];
+    string index_str;
+
+    sprintf(t, "%d", index);
+    index_str = t;
+    for (iter = _backendServerVector.begin(); iter != _backendServerVector.end(); ++iter) {
+	storageServer = iter->first;
+	storageServerPort = iter->second;
+	cout << "Release lock to server " << storageServer << " " << storageServerPort << endl;
+	boost::shared_ptr<TSocket> socket(new TSocket(storageServer, storageServerPort));
+	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+	KeyValueStoreClient client(protocol);
+	socket->setConnTimeout(100);
+	socket->setRecvTimeout(100);
+	socket->setSendTimeout(100);
+	try {
+	    transport->open();
+
+	    client.Put("_release_lock", index_str, "b_s");
+	    transport->close();
+	} catch (TException &tx) {
+	    cout << "ERROR: %s" << tx.what() << endl;
+	    continue;
+	}
+    }
+    return KVStoreStatus::OK;
+  }
+
+  KVStoreStatus::type RequestLockFromOtherServers(int index) {
+    // Making the RPC Call to the Storage server
+    std::vector<pair<string, int> >::iterator iter;
+    std::string storageServer;
+    KVStoreStatus::type status;
+    int storageServerPort;
+    char t[256];
+    string index_str;
+
+    sprintf(t, "%d", index);
+    index_str = t;
+    for (iter = _backendServerVector.begin(); iter != _backendServerVector.end(); ++iter) {
+	storageServer = iter->first;
+	storageServerPort = iter->second;
+	cout << "Request lock from server " << storageServer << " " << storageServerPort << endl;
+	boost::shared_ptr<TSocket> socket(new TSocket(storageServer, storageServerPort));
+	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+	KeyValueStoreClient client(protocol);
+	socket->setConnTimeout(100);
+	socket->setRecvTimeout(100);
+	socket->setSendTimeout(100);
+	try {
+	    transport->open();
+
+	    status = client.Put("_grab_lock", index_str, "b_s");
+	    if (status != KVStoreStatus::OK) {
+		cout << "ERROR: Failed to grab time_index lock from " << storageServer \
+		     << " " << storageServerPort << endl;
+	    	transport->close();
+		goto failed;
+	    }
+
+	    transport->close();
+	} catch (TException &tx) {
+	    cout << "ERROR: %s" << tx.what() << endl;
+	    continue;
+	}
+    }
+    return KVStoreStatus::OK;
+
+failed:
+    ReleaseLockToOtherServers(index);
+    return KVStoreStatus::EPUTFAILED;
+  }
+
     int _id;
     vector < pair<string, int> > _backendServerVector;
     vector<string> user_list;
     std::map<string, vector<string> > subscription_list;
     std::map<string, vector<string> > user_time_list;
     std::map<string, string> time_tribble_list;
+    std::map<int, string> time_lock_list;
     int _cur_index;
 
 };
